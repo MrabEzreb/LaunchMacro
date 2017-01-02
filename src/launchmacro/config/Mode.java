@@ -37,6 +37,14 @@ public class Mode {
 		}
 	}
 	
+	public DeviceIdentifier iDID() {
+		return new DeviceIdentifier(props.getProperty("devicei"));
+	}
+	
+	public DeviceIdentifier oDID() {
+		return new DeviceIdentifier(props.getProperty("deviceo"));
+	}
+	
 	public void activate(Receiver r) throws InvalidMidiDataException {
 		System.out.println("Activating " + name);
 		MultiMessage dogo = new MultiMessage(props.getProperty("back"));

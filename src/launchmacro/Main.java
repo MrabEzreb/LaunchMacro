@@ -41,6 +41,10 @@ public class Main {
 	public static Configurator ui;
 	
 	public static ArrayList<Mode> modes;
+	public static HashMap<Integer, Receiver> modesRh;
+	public static HashMap<Integer, Transmitter> modesTh;
+	public static ArrayList<Receiver> modesR;
+	public static ArrayList<Transmitter> modesT;
 	public static int activated = -1;
 	
 	public Main() {
@@ -48,16 +52,36 @@ public class Main {
 	
 	public static void main(String[] args) throws InterruptedException, IOException, AWTException, MidiUnavailableException, InvalidMidiDataException {
 		createTrayIcon();
+		Runtime.getRuntime().addShutdownHook(deactivateMode);
 		ui = new Configurator();
-		MidiDevice[] mda = getChosenDevice();
+		MidiDevice[] mda = getCorrectDevices();
 		createModesTest();
-		midiLoop(mda[0], mda[1]);
+		midiLoop();
+	}
+	
+	public static MidiDevice[] getCorrectDevices() throws MidiUnavailableException {
+		MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
+		int chosen = 0;
+		int chosen2 = 0;
+		for (int i = 0; i < infos.length; i++) {
+			if(infos[i].getName().equals("Launchpad MK2")) {
+				MidiDevice md = MidiSystem.getMidiDevice(infos[i]);
+				if(md.getMaxReceivers() == -1) {
+					chosen2 = i;
+				} else {
+					chosen = i;
+				}
+			}
+		}
+		return new MidiDevice[] {MidiSystem.getMidiDevice(infos[chosen]), MidiSystem.getMidiDevice(infos[chosen2])};
 	}
 	
 	public static void createModesTest() {
 		modes = new ArrayList<>();
-		DeviceIdentifier launchMk2i = new DeviceIdentifier("Launchpad Mk2", ".*", 0, -1);
-		DeviceIdentifier launchMk2o = new DeviceIdentifier("Launchpad Mk2", ".*", -1, 0);
+		modesRh = new HashMap<>();
+		modesTh = new HashMap<>();
+		DeviceIdentifier launchMk2i = new DeviceIdentifier("Launchpad MK2", ".*", 0, -1);
+		DeviceIdentifier launchMk2o = new DeviceIdentifier("Launchpad MK2", ".*", -1, 0);
 		Trigger user1T = new Trigger(new Message(ShortMessage.CONTROL_CHANGE, 0, 109, 0));
 		Trigger user2T = new Trigger(new Message(ShortMessage.CONTROL_CHANGE, 0, 110, 0));
 		Mode mode1 = new Mode("User 1", launchMk2i, launchMk2o, user1T, new MultiMessage(new Message(SysexMessage.SYSTEM_EXCLUSIVE, 0, new int[] {0, 32, 41, 2, 24, 11, 109, 63, 63, 63, 247})), new MultiMessage(new Message(SysexMessage.SYSTEM_EXCLUSIVE, 0, new int[] {0, 32, 41, 2, 24, 11, 109, 0, 0, 0, 247})), new HashMap<>());
@@ -83,6 +107,73 @@ public class Main {
 		int chosen2 = new Integer(s.nextLine());
 		s.close();
 		return new MidiDevice[] {MidiSystem.getMidiDevice(infos[chosen]), MidiSystem.getMidiDevice(infos[chosen2])};
+	}
+	
+	public static Thread deactivateMode = new Thread(new Runnable() {
+		
+		@Override
+		public void run() {
+			if(activated > -1) {
+				try {
+					Mode mode = modes.get(activated);
+					Receiver r = modesRh.get(activated);
+					mode.deactivate(r);
+				} catch (InvalidMidiDataException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+		}
+	});
+	
+	public static void midiLoop() throws MidiUnavailableException, InterruptedException, InvalidMidiDataException {
+		JReceiver jr = new JReceiver();
+		for (int i = 0; i < modes.size(); i++) {
+			Mode mode = modes.get(i);
+			MidiDevice.Info[] dia = MidiSystem.getMidiDeviceInfo();
+			MidiDevice devi = MidiSystem.getMidiDevice(dia[mode.iDID().findDevice(dia)]);
+			MidiDevice devo = MidiSystem.getMidiDevice(dia[mode.oDID().findDevice(dia)]);
+			devi.open();
+			Transmitter t = devi.getTransmitter();
+			modesTh.put(i, t);
+//			modesT.set(i, t);
+			devo.open();
+			Receiver r = devo.getReceiver();
+			modesRh.put(i, r);
+//			modesR.set(i, r);
+			t.setReceiver(jr);
+			Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+				
+				@Override
+				public void run() {
+					try {
+						Thread.sleep(500);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+					devi.close();
+					devo.close();
+				}
+			}));
+		}
+		while(true) {
+			Message m1 = jr.getMessage();
+			if(m1 != null) {
+				System.out.println(m1.toString());
+				for (int i = 0; i < modes.size(); i++) {
+					Mode mode = modes.get(i);
+					if(mode.checkActivation(m1)) {
+						if(activated > -1) {
+							modes.get(activated).deactivate(modesRh.get(activated));
+						}
+						activated = i;
+						mode.activate(modesRh.get(activated));
+					}
+				}
+			}
+			Thread.sleep(100);
+		}
 	}
 	
 	public static void midiLoop(MidiDevice devi, MidiDevice devo) throws MidiUnavailableException, InterruptedException, InvalidMidiDataException {
